@@ -1,0 +1,32 @@
+# Binaries and logs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.log
+*.csv
+
+# Environment
+.env
+.env.*
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE directories
+.idea/
+.vscode/
+
+# Log files
+logs/
+
+# Internal use scripts
+dir.txt
+cmd.txt

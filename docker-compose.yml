@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  nmi-payment:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nmi-payment-service
+    ports:
+      - "8080:8080"
+    environment:
+      - MODE=serve
+      - NMI_API_KEY=${NMI_API_KEY}
+      - API_URL=${API_URL}
+      - DEBUG_MODE=${DEBUG_MODE}
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

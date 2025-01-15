@@ -7,7 +7,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o payment-service ./cmd/main.go
+# Add -v for verbose output to see any build errors
+# Change this line in Dockerfile
+RUN CGO_ENABLED=0 GOOS=linux go build -v -o payment-service ./cmd/main.go
 
 # Final stage
 FROM alpine:latest

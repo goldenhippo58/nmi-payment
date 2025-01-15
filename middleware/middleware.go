@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"nmi-payment/metrics"
+	"nmi-pay-int/metrics" // Make sure this matches your module name
 
 	"github.com/gorilla/mux"
 	"golang.org/x/time/rate"

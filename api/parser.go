@@ -90,12 +90,3 @@ func ExtractValue(rawResponse, key string) string {
 	}
 	return values.Get(key)
 }
-
-// Helper function to extract specific value from NMI response
-func ExtractValue(rawResponse, key string) string {
-	values, err := url.ParseQuery(rawResponse)
-	if err != nil {
-		return ""
-	}
-	return values.Get(key)
-}

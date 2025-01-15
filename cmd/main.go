@@ -22,6 +22,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+var plans = make(map[string]Plan)
+
+func storePlan(plan Plan) {
+	plans[plan.ID] = plan
+}
+
+
 // LogTransaction logs transaction details to a text file
 func LogTransaction(logMessage string) {
 	logFile, err := os.OpenFile("logs/transactions.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
@@ -285,11 +292,16 @@ func handleLookup(cfg *config.Config) http.HandlerFunc {
 			TransactionID: transactionID,
 		}
 
+		fmt.Printf("Lookup Request: %+v\n", req) // Debug log
+
 		resp, err := api.LookupTransaction(r.Context(), req)
 		if err != nil {
+			metrics.LogError(fmt.Errorf("Lookup Error: %v", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		fmt.Printf("Lookup Response: %+v\n", resp) // Debug log
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -311,7 +323,7 @@ func handleCreateRecurring(cfg *config.Config) http.HandlerFunc {
 
 		resp, err := api.ProcessRecurringPayment(r.Context(), req)
 		if err != nil {
-			metrics.LogError(fmt.Errorf("recurring Payment Error: %v", err))
+			metrics.LogError(fmt.Errorf("Recurring Payment Error: %v", err))
 			http.Error(w, fmt.Sprintf("Error: %v", err.Error()), http.StatusInternalServerError)
 			return
 		}
@@ -358,7 +370,6 @@ func handleUpdateRecurring(cfg *config.Config) http.HandlerFunc {
 	}
 }
 
-
 func handleCancelRecurring(cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -377,6 +388,51 @@ func handleCancelRecurring(cfg *config.Config) http.HandlerFunc {
 		})
 
 		LogTransaction(fmt.Sprintf("CANCEL RECURRING: Subscription ID=%s", subscriptionID))
+	}
+}
+
+func handleUpdatePlan(cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var plan Plan
+		if err := json.NewDecoder(r.Body).Decode(&plan); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the plan exists
+		existingPlan, exists := plans[plan.ID]
+		if !exists {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+
+		// Update the plan
+		if plan.Name != "" {
+			existingPlan.Name = plan.Name
+		}
+		if plan.Amount != "" {
+			existingPlan.Amount = plan.Amount
+		}
+		if plan.DayFrequency != "" {
+			existingPlan.DayFrequency = plan.DayFrequency
+		}
+		if plan.Payments != "" {
+			existingPlan.Payments = plan.Payments
+		}
+		if plan.MonthFrequency != "" {
+			existingPlan.MonthFrequency = plan.MonthFrequency
+		}
+		if plan.DayOfMonth != "" {
+			existingPlan.DayOfMonth = plan.DayOfMonth
+		}
+
+		plans[plan.ID] = existingPlan
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(PlanResponse{
+			Plan:    existingPlan,
+			Message: "Plan updated successfully",
+		})
 	}
 }
 

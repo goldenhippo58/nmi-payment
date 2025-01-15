@@ -137,8 +137,11 @@ type VoidRequest struct {
 }
 
 type LookupRequest struct {
-	APIKey        string `json:"api_key,omitempty"`
-	TransactionID string `json:"transaction_id"`
+	APIKey          string `json:"api_key,omitempty"`
+	TransactionID   string `json:"transaction_id"`
+	Condition       string `json:"condition,omitempty"`
+	TransactionType string `json:"transaction_type,omitempty"`
+	ActionType      string `json:"action_type,omitempty"`
 }
 
 type RecurringPaymentRequest struct {
@@ -149,6 +152,21 @@ type RecurringPaymentRequest struct {
 	BillingCycle    string       `json:"billing_cycle"` // monthly, yearly, etc.
 	StartDate       string       `json:"start_date,omitempty"`
 	Billing         *BillingInfo `json:"billing,omitempty"`
+}
+
+type Plan struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Amount         string `json:"amount"`
+	DayFrequency   string `json:"day_frequency,omitempty"`
+	Payments       string `json:"payments,omitempty"`
+	MonthFrequency string `json:"month_frequency,omitempty"`
+	DayOfMonth     string `json:"day_of_month,omitempty"`
+}
+
+type PlanResponse struct {
+	Plan    Plan   `json:"plan"`
+	Message string `json:"message"`
 }
 
 // ProcessPayment handles all payment transactions
@@ -366,7 +384,12 @@ func LookupTransaction(ctx context.Context, req LookupRequest) (*LookupResponse,
 
 	formData := url.Values{}
 	formData.Set("security_key", req.APIKey)
-	formData.Set("transactionid", req.TransactionID)
+	formData.Set("transaction_id", req.TransactionID)
+	formData.Set("condition", "complete")
+	formData.Set("transaction_type", "cc")
+	formData.Set("action_type", "sale")
+
+	fmt.Printf("Lookup Form Data: %s\n", formData.Encode())
 
 	resp, err := sendRequest(ctx, formData)
 	if err != nil {
@@ -406,18 +429,18 @@ func ProcessRecurringPayment(ctx context.Context, req RecurringPaymentRequest) (
 	formData.Set("recurring", "add_subscription")
 
 	// Validate and set start_date
-	var startDate string
 	if req.StartDate != "" {
 		if _, err := time.Parse("01/02/2006", req.StartDate); err != nil {
 			return nil, NewNMIError(ErrInvalidRequest, "invalid start_date format (expected MM/DD/YYYY)", "")
 		}
-		startDate = req.StartDate
-	} else {
-		startDate = time.Now().Format("01/02/2006")
+		formData.Set("start_date", req.StartDate)
 	}
-	formData.Set("start_date", startDate)
-	fmt.Printf("Start Date for Recurring Payment: %s\n", startDate) // Debug log
 
+	// Add plan details if available
+	formData.Set("plan_name", req.PlanID) // Assuming PlanID maps to the plan name
+	formData.Set("plan_amount", req.Amount)
+
+	// Add billing address details
 	if req.Billing != nil {
 		addBillingInfo(formData, req.Billing)
 	}
@@ -461,19 +484,23 @@ func UpdateRecurringPayment(ctx context.Context, req RecurringPaymentRequest, su
 		formData.Set("billing_cycle", req.BillingCycle)
 	}
 
+	// Add updated plan details if available
+	if req.PlanID != "" {
+		formData.Set("plan_id", req.PlanID)
+	}
+
+	// Add updated billing address details
 	if req.Billing != nil {
 		addBillingInfo(formData, req.Billing)
 	}
 
 	resp, err := sendRequest(ctx, formData)
 	if err != nil {
-		metrics.RecordErrorMetrics("recurring", "update_error")
 		return nil, err
 	}
 
 	parsedResp, err := ParseNMIResponse(resp)
 	if err != nil {
-		metrics.RecordErrorMetrics("recurring", "parse_error")
 		return nil, err
 	}
 
@@ -500,13 +527,11 @@ func CancelRecurringPayment(ctx context.Context, apiKey, subscriptionID string) 
 
 	resp, err := sendRequest(ctx, formData)
 	if err != nil {
-		metrics.RecordErrorMetrics("recurring", "cancel_error")
 		return err
 	}
 
 	parsedResp, err := ParseNMIResponse(resp)
 	if err != nil {
-		metrics.RecordErrorMetrics("recurring", "parse_error")
 		return err
 	}
 
@@ -514,9 +539,35 @@ func CancelRecurringPayment(ctx context.Context, apiKey, subscriptionID string) 
 		return ParseNMIErrorResponse(parsedResp.ResponseText, parsedResp.ResponseCode, resp)
 	}
 
-	metrics.RecordRecurringPayment("cancel", "success")
 	return nil
 }
+
+func handleAddPlan(cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var plan Plan
+		if err := json.NewDecoder(r.Body).Decode(&plan); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Validate the plan data
+		if plan.ID == "" || plan.Name == "" || plan.Amount == "" {
+			http.Error(w, "Plan ID, Name, and Amount are required", http.StatusBadRequest)
+			return
+		}
+
+		// Store the plan (e.g., in a database or in-memory map)
+		// For simplicity, let's assume an in-memory map
+		storePlan(plan)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(PlanResponse{
+			Plan:    plan,
+			Message: "Plan added successfully",
+		})
+	}
+}
+
 
 // Helper function to add billing information to form data
 func addBillingInfo(formData url.Values, billing *BillingInfo) {

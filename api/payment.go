@@ -395,14 +395,28 @@ func ProcessRecurringPayment(ctx context.Context, req RecurringPaymentRequest) (
 	formData := url.Values{}
 	formData.Set("security_key", req.APIKey)
 	formData.Set("customer_vault_id", req.CustomerVaultID)
+
+	if req.PlanID == "" {
+		return nil, NewNMIError(ErrInvalidRequest, "plan_id is required", "")
+	}
 	formData.Set("plan_id", req.PlanID)
+
 	formData.Set("amount", req.Amount)
 	formData.Set("billing_cycle", req.BillingCycle)
 	formData.Set("recurring", "add_subscription")
 
+	// Validate and set start_date
+	var startDate string
 	if req.StartDate != "" {
-		formData.Set("start_date", req.StartDate)
+		if _, err := time.Parse("01/02/2006", req.StartDate); err != nil {
+			return nil, NewNMIError(ErrInvalidRequest, "invalid start_date format (expected MM/DD/YYYY)", "")
+		}
+		startDate = req.StartDate
+	} else {
+		startDate = time.Now().Format("01/02/2006")
 	}
+	formData.Set("start_date", startDate)
+	fmt.Printf("Start Date for Recurring Payment: %s\n", startDate) // Debug log
 
 	if req.Billing != nil {
 		addBillingInfo(formData, req.Billing)
@@ -430,6 +444,10 @@ func ProcessRecurringPayment(ctx context.Context, req RecurringPaymentRequest) (
 
 // UpdateRecurringPayment modifies an existing subscription
 func UpdateRecurringPayment(ctx context.Context, req RecurringPaymentRequest, subscriptionID string) (*RecurringResponse, error) {
+	if subscriptionID == "" {
+		return nil, NewNMIError(ErrInvalidRequest, "subscription_id is required", "")
+	}
+
 	formData := url.Values{}
 	formData.Set("security_key", req.APIKey)
 	formData.Set("subscription_id", subscriptionID)
@@ -471,6 +489,10 @@ func UpdateRecurringPayment(ctx context.Context, req RecurringPaymentRequest, su
 
 // CancelRecurringPayment cancels an existing subscription
 func CancelRecurringPayment(ctx context.Context, apiKey, subscriptionID string) error {
+	if subscriptionID == "" {
+		return NewNMIError(ErrInvalidRequest, "subscription_id is required", "")
+	}
+
 	formData := url.Values{}
 	formData.Set("security_key", apiKey)
 	formData.Set("subscription_id", subscriptionID)

@@ -61,121 +61,121 @@ func SaveTransaction(transactionID, transactionType, responseText, amount string
 }
 
 func main() {
-    // Initialize logger
-    metrics.InitLogger()
+	// Initialize logger
+	metrics.InitLogger()
 
-    mode := os.Getenv("MODE")
-    if mode == "serve" {
-        startMicroservice()
-    } else {
-        runStandaloneDemo()
-    }
+	mode := os.Getenv("MODE")
+	if mode == "serve" {
+		startMicroservice()
+	} else {
+		runStandaloneDemo()
+	}
 }
 
 func startMicroservice() {
-    fmt.Println("Starting microservice...")
-    cfg := config.LoadConfig()
+	fmt.Println("Starting microservice...")
+	cfg := config.LoadConfig()
 
-    // Initialize router
-    r := mux.NewRouter()
-    fmt.Println("Router initialized...")
+	// Initialize router
+	r := mux.NewRouter()
+	fmt.Println("Router initialized...")
 
-    // Create middleware instances
-    securityMiddleware := middleware.NewSecurityMiddleware(100)
+	// Create middleware instances
+	securityMiddleware := middleware.NewSecurityMiddleware(100)
 
-    // Apply middleware to all routes
-    r.Use(middleware.LoggingMiddleware)
-    r.Use(securityMiddleware.RateLimiter)
-    r.Use(middleware.TimeoutMiddleware(30 * time.Second))
-    r.Use(middleware.MetricsMiddleware)
+	// Apply middleware to all routes
+	r.Use(middleware.LoggingMiddleware)
+	r.Use(securityMiddleware.RateLimiter)
+	r.Use(middleware.TimeoutMiddleware(30 * time.Second))
+	r.Use(middleware.MetricsMiddleware)
 
-    fmt.Println("Middleware applied...")
+	fmt.Println("Middleware applied...")
 
-    // Add test endpoint
-    r.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-    }).Methods("GET")
+	// Add test endpoint
+	r.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}).Methods("GET")
 
-    // Payment endpoints
-    r.HandleFunc("/payments/tokenize", handleTokenize(cfg)).Methods("POST")
-    r.HandleFunc("/payments/sale", handleSale(cfg)).Methods("POST")
-    r.HandleFunc("/payments/refund", handleRefund(cfg)).Methods("POST")
-    r.HandleFunc("/payments/void", handleVoid(cfg)).Methods("POST")
-    r.HandleFunc("/payments/lookup", handleLookup(cfg)).Methods("GET")
+	// Payment endpoints
+	r.HandleFunc("/payments/tokenize", handleTokenize(cfg)).Methods("POST")
+	r.HandleFunc("/payments/sale", handleSale(cfg)).Methods("POST")
+	r.HandleFunc("/payments/refund", handleRefund(cfg)).Methods("POST")
+	r.HandleFunc("/payments/void", handleVoid(cfg)).Methods("POST")
+	r.HandleFunc("/payments/lookup", handleLookup(cfg)).Methods("GET")
 
-    // Recurring payment endpoints
-    r.HandleFunc("/payments/recurring/create", handleCreateRecurring(cfg)).Methods("POST")
-    r.HandleFunc("/payments/recurring/update/{subscription_id}", handleUpdateRecurring(cfg)).Methods("PUT")
-    r.HandleFunc("/payments/recurring/cancel/{subscription_id}", handleCancelRecurring(cfg)).Methods("DELETE")
+	// Recurring payment endpoints
+	r.HandleFunc("/payments/recurring/create", handleCreateRecurring(cfg)).Methods("POST")
+	r.HandleFunc("/payments/recurring/update/{subscription_id}", handleUpdateRecurring(cfg)).Methods("PUT")
+	r.HandleFunc("/payments/recurring/cancel/{subscription_id}", handleCancelRecurring(cfg)).Methods("DELETE")
 
-    // Metrics endpoint
-    r.Handle("/metrics", promhttp.Handler())
+	// Metrics endpoint
+	r.Handle("/metrics", promhttp.Handler())
 
-    // Health check endpoint
-    r.HandleFunc("/health", handleHealth).Methods("GET")
+	// Health check endpoint
+	r.HandleFunc("/health", handleHealth).Methods("GET")
 
-    // Print all registered routes
-    fmt.Println("\nRegistered Routes:")
-    r.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
-        pathTemplate, _ := route.GetPathTemplate()
-        methods, _ := route.GetMethods()
-        fmt.Printf("Route: %-30s Methods: %v\n", pathTemplate, methods)
-        return nil
-    })
+	// Print all registered routes
+	fmt.Println("\nRegistered Routes:")
+	r.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+		pathTemplate, _ := route.GetPathTemplate()
+		methods, _ := route.GetMethods()
+		fmt.Printf("Route: %-30s Methods: %v\n", pathTemplate, methods)
+		return nil
+	})
 
-    // Create server with timeouts
-    srv := &http.Server{
-        Addr:         ":8080",
-        Handler:      r,  // Make sure router is set as handler
-        ReadTimeout:  15 * time.Second,
-        WriteTimeout: 15 * time.Second,
-        IdleTimeout:  60 * time.Second,
-    }
+	// Create server with timeouts
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      r, // Make sure router is set as handler
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
 
-    // Error channel for server errors
-    errChan := make(chan error, 1)
+	// Error channel for server errors
+	errChan := make(chan error, 1)
 
-    // Start server
-    fmt.Printf("\nServer starting on port %s...\n", srv.Addr)
-    go func() {
-        fmt.Println("Server is listening...")
-        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            fmt.Printf("Server error: %v\n", err)
-            errChan <- err
-        }
-    }()
+	// Start server
+	fmt.Printf("\nServer starting on port %s...\n", srv.Addr)
+	go func() {
+		fmt.Println("Server is listening...")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("Server error: %v\n", err)
+			errChan <- err
+		}
+	}()
 
-    // Wait for either shutdown signal or server error
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	// Wait for either shutdown signal or server error
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-    select {
-    case err := <-errChan:
-        fmt.Printf("Server failed: %v\n", err)
-        metrics.LogError(fmt.Errorf("server failed: %v", err))
-    case <-quit:
-        fmt.Println("Shutdown signal received...")
-        metrics.LogInfo("Shutting down server...")
+	select {
+	case err := <-errChan:
+		fmt.Printf("Server failed: %v\n", err)
+		metrics.LogError(fmt.Errorf("server failed: %v", err))
+	case <-quit:
+		fmt.Println("Shutdown signal received...")
+		metrics.LogInfo("Shutting down server...")
 
-        ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-        defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-        if err := srv.Shutdown(ctx); err != nil {
-            fmt.Printf("Server forced to shutdown: %v\n", err)
-            metrics.LogError(fmt.Errorf("server forced to shutdown: %v", err))
-        }
+		if err := srv.Shutdown(ctx); err != nil {
+			fmt.Printf("Server forced to shutdown: %v\n", err)
+			metrics.LogError(fmt.Errorf("server forced to shutdown: %v", err))
+		}
 
-        fmt.Println("Server shutdown complete")
-    }
+		fmt.Println("Server shutdown complete")
+	}
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]string{
-        "status": "OK",
-        "timestamp": time.Now().Format(time.RFC3339),
-    })
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":    "OK",
+		"timestamp": time.Now().Format(time.RFC3339),
+	})
 }
 
 func handleTokenize(cfg *config.Config) http.HandlerFunc {
@@ -307,16 +307,21 @@ func handleCreateRecurring(cfg *config.Config) http.HandlerFunc {
 		}
 
 		req.APIKey = cfg.APIKey
+		fmt.Printf("Received Create Recurring Request: %+v\n", req) // Debug log
+
 		resp, err := api.ProcessRecurringPayment(r.Context(), req)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			metrics.LogError(fmt.Errorf("recurring Payment Error: %v", err))
+			http.Error(w, fmt.Sprintf("Error: %v", err.Error()), http.StatusInternalServerError)
 			return
 		}
+
+		fmt.Printf("Recurring Payment Response: %+v\n", resp) // Debug log
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 
-		LogTransaction(fmt.Sprintf("RECURRING: Subscription ID=%s, Plan=%s", resp.SubscriptionID, resp.PlanID))
+		LogTransaction(fmt.Sprintf("RECURRING: Subscription ID=%s, Plan=%s, Response=%s", resp.SubscriptionID, req.PlanID, resp.Status))
 	}
 }
 
@@ -325,6 +330,11 @@ func handleUpdateRecurring(cfg *config.Config) http.HandlerFunc {
 		vars := mux.Vars(r)
 		subscriptionID := vars["subscription_id"]
 
+		if subscriptionID == "" {
+			http.Error(w, "subscription_id is required", http.StatusBadRequest)
+			return
+		}
+
 		var req api.RecurringPaymentRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request payload", http.StatusBadRequest)
@@ -332,9 +342,12 @@ func handleUpdateRecurring(cfg *config.Config) http.HandlerFunc {
 		}
 
 		req.APIKey = cfg.APIKey
+		fmt.Printf("Updating Subscription ID: %s\n", subscriptionID) // Debug log
+
 		resp, err := api.UpdateRecurringPayment(r.Context(), req, subscriptionID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			metrics.LogError(fmt.Errorf("update Recurring Payment Error: %v", err))
+			http.Error(w, fmt.Sprintf("Error: %v", err.Error()), http.StatusInternalServerError)
 			return
 		}
 
@@ -344,6 +357,7 @@ func handleUpdateRecurring(cfg *config.Config) http.HandlerFunc {
 		LogTransaction(fmt.Sprintf("UPDATE RECURRING: Subscription ID=%s", subscriptionID))
 	}
 }
+
 
 func handleCancelRecurring(cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

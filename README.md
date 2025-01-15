@@ -57,8 +57,8 @@ A production-ready Go microservice for integrating with the NMI (Network Merchan
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/nmi-payment-service.git
-   cd nmi-payment-service
+   git clone https://github.com/goldenhippo58/nmi-payment.git
+   cd nmi-payment
    ```
 
 2. Install dependencies:

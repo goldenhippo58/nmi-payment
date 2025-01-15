@@ -31,3 +31,4 @@ logs/
 dir.txt
 cmd.txt
 git-cmd.txt
+.gitignore

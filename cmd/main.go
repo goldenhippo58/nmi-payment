@@ -22,13 +22,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var plans = make(map[string]Plan)
-
-func storePlan(plan Plan) {
-	plans[plan.ID] = plan
-}
-
-
 // LogTransaction logs transaction details to a text file
 func LogTransaction(logMessage string) {
 	logFile, err := os.OpenFile("logs/transactions.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
@@ -115,6 +108,12 @@ func startMicroservice() {
 	r.HandleFunc("/payments/recurring/create", handleCreateRecurring(cfg)).Methods("POST")
 	r.HandleFunc("/payments/recurring/update/{subscription_id}", handleUpdateRecurring(cfg)).Methods("PUT")
 	r.HandleFunc("/payments/recurring/cancel/{subscription_id}", handleCancelRecurring(cfg)).Methods("DELETE")
+
+	// Plan event endpoint
+	r.HandleFunc("/plans/add", api.HandleAddPlan()).Methods("POST")
+	r.HandleFunc("/plans/update", api.HandleUpdatePlan()).Methods("PUT")
+	r.HandleFunc("/plans/cancel/{id}", api.HandleCancelPlan()).Methods("DELETE")
+	r.HandleFunc("/plans/list", api.HandleListPlans()).Methods("GET")
 
 	// Metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())
@@ -296,7 +295,7 @@ func handleLookup(cfg *config.Config) http.HandlerFunc {
 
 		resp, err := api.LookupTransaction(r.Context(), req)
 		if err != nil {
-			metrics.LogError(fmt.Errorf("Lookup Error: %v", err))
+			metrics.LogError(fmt.Errorf("lookup Error: %v", err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -323,7 +322,7 @@ func handleCreateRecurring(cfg *config.Config) http.HandlerFunc {
 
 		resp, err := api.ProcessRecurringPayment(r.Context(), req)
 		if err != nil {
-			metrics.LogError(fmt.Errorf("Recurring Payment Error: %v", err))
+			metrics.LogError(fmt.Errorf("recurring Payment Error: %v", err))
 			http.Error(w, fmt.Sprintf("Error: %v", err.Error()), http.StatusInternalServerError)
 			return
 		}
@@ -393,43 +392,36 @@ func handleCancelRecurring(cfg *config.Config) http.HandlerFunc {
 
 func handleUpdatePlan(cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var plan Plan
+		var plan api.Plan
 		if err := json.NewDecoder(r.Body).Decode(&plan); err != nil {
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			http.Error(w, "invalid request payload", http.StatusBadRequest)
 			return
 		}
 
-		// Check if the plan exists
-		existingPlan, exists := plans[plan.ID]
+		// Use api.PlanStore to manage the plan update
+		api.PlanStore.Lock()
+		defer api.PlanStore.Unlock()
+
+		existingPlan, exists := api.PlanStore.Data[plan.ID]
 		if !exists {
-			http.Error(w, "Plan not found", http.StatusNotFound)
+			http.Error(w, "plan not found", http.StatusNotFound)
 			return
 		}
 
-		// Update the plan
+		// Update fields only if they are non-empty
 		if plan.Name != "" {
 			existingPlan.Name = plan.Name
 		}
 		if plan.Amount != "" {
 			existingPlan.Amount = plan.Amount
 		}
-		if plan.DayFrequency != "" {
-			existingPlan.DayFrequency = plan.DayFrequency
-		}
-		if plan.Payments != "" {
-			existingPlan.Payments = plan.Payments
-		}
-		if plan.MonthFrequency != "" {
-			existingPlan.MonthFrequency = plan.MonthFrequency
-		}
-		if plan.DayOfMonth != "" {
-			existingPlan.DayOfMonth = plan.DayOfMonth
-		}
 
-		plans[plan.ID] = existingPlan
+		// Save the updated plan
+		api.PlanStore.Data[plan.ID] = existingPlan
 
+		// Respond with the updated plan
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PlanResponse{
+		json.NewEncoder(w).Encode(api.PlanResponse{
 			Plan:    existingPlan,
 			Message: "Plan updated successfully",
 		})

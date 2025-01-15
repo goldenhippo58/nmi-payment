@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"nmi-pay-int/metrics"
+
+	"github.com/gorilla/mux"
 )
 
 var (
@@ -415,36 +418,39 @@ func LookupTransaction(ctx context.Context, req LookupRequest) (*LookupResponse,
 
 // ProcessRecurringPayment sets up recurring payments
 func ProcessRecurringPayment(ctx context.Context, req RecurringPaymentRequest) (*RecurringResponse, error) {
+	// Log the incoming request
+	fmt.Printf("Incoming Recurring Payment Request: %+v\n", req)
+
+	// Ensure the plan_id exists in PlanStore
+	PlanStore.RLock()
+	defer PlanStore.RUnlock()
+	fmt.Printf("PlanStore Contents: %+v\n", PlanStore.Data)
+
+	plan, exists := PlanStore.Data[req.PlanID]
+	if !exists {
+		fmt.Printf("Plan ID not found: %s\n", req.PlanID)
+		return nil, NewNMIError(ErrInvalidRequest, "plan_id does not exist", "")
+	}
+
+	// Log the retrieved plan
+	fmt.Printf("Retrieved Plan: %+v\n", plan)
+
+	// Prepare form data
 	formData := url.Values{}
 	formData.Set("security_key", req.APIKey)
 	formData.Set("customer_vault_id", req.CustomerVaultID)
-
-	if req.PlanID == "" {
-		return nil, NewNMIError(ErrInvalidRequest, "plan_id is required", "")
-	}
-	formData.Set("plan_id", req.PlanID)
-
-	formData.Set("amount", req.Amount)
-	formData.Set("billing_cycle", req.BillingCycle)
+	formData.Set("plan_id", plan.ID)
 	formData.Set("recurring", "add_subscription")
 
-	// Validate and set start_date
-	if req.StartDate != "" {
-		if _, err := time.Parse("01/02/2006", req.StartDate); err != nil {
-			return nil, NewNMIError(ErrInvalidRequest, "invalid start_date format (expected MM/DD/YYYY)", "")
-		}
-		formData.Set("start_date", req.StartDate)
-	}
-
-	// Add plan details if available
-	formData.Set("plan_name", req.PlanID) // Assuming PlanID maps to the plan name
-	formData.Set("plan_amount", req.Amount)
-
-	// Add billing address details
+	// Add billing details
 	if req.Billing != nil {
 		addBillingInfo(formData, req.Billing)
 	}
 
+	// Log outgoing form data
+	fmt.Printf("Outgoing Form Data: %s\n", formData.Encode())
+
+	// Send request
 	resp, err := sendRequest(ctx, formData)
 	if err != nil {
 		return nil, err
@@ -542,7 +548,75 @@ func CancelRecurringPayment(ctx context.Context, apiKey, subscriptionID string) 
 	return nil
 }
 
-func handleAddPlan(cfg *config.Config) http.HandlerFunc {
+var PlanStore = struct {
+	sync.RWMutex
+	Data map[string]Plan
+}{Data: make(map[string]Plan)}
+
+// HandleAddPlan Adds a new plan
+type AddPlanRequest struct {
+	EventID   string `json:"event_id"`
+	EventType string `json:"event_type"`
+	EventBody struct {
+		Merchant struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"merchant"`
+		Features struct {
+			IsTestMode bool `json:"is_test_mode"`
+		} `json:"features"`
+		Plan Plan `json:"plan"`
+	} `json:"event_body"`
+}
+
+func HandleAddPlan() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req AddPlanRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Extract the plan details from the event body
+		plan := req.EventBody.Plan
+		if plan.ID == "" || plan.Name == "" || plan.Amount == "" {
+			http.Error(w, "Plan ID, Name, and Amount are required", http.StatusBadRequest)
+			return
+		}
+
+		// Check for duplicate plan ID
+		PlanStore.RLock()
+		_, exists := PlanStore.Data[plan.ID]
+		PlanStore.RUnlock()
+		if exists {
+			http.Error(w, "Plan ID already exists", http.StatusConflict)
+			return
+		}
+
+		// Add the plan to the PlanStore
+		PlanStore.Lock()
+		defer PlanStore.Unlock()
+		PlanStore.Data[plan.ID] = plan
+
+		// Log the incoming request and PlanStore state
+		fmt.Printf("Plan Added: %+v\n", plan)
+		fmt.Printf("PlanStore Data: %+v\n", PlanStore.Data)
+
+		// Respond with success
+		response := PlanResponse{
+			Plan:    plan,
+			Message: "Plan added successfully",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			fmt.Printf("Error encoding response: %v\n", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+	}
+}
+
+// HandleUpdatePlan Updates current plan
+func HandleUpdatePlan() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var plan Plan
 		if err := json.NewDecoder(r.Body).Decode(&plan); err != nil {
@@ -550,24 +624,67 @@ func handleAddPlan(cfg *config.Config) http.HandlerFunc {
 			return
 		}
 
-		// Validate the plan data
-		if plan.ID == "" || plan.Name == "" || plan.Amount == "" {
-			http.Error(w, "Plan ID, Name, and Amount are required", http.StatusBadRequest)
+		PlanStore.Lock()
+		defer PlanStore.Unlock()
+
+		existingPlan, exists := PlanStore.Data[plan.ID]
+		if !exists {
+			http.Error(w, "Plan not found", http.StatusNotFound)
 			return
 		}
 
-		// Store the plan (e.g., in a database or in-memory map)
-		// For simplicity, let's assume an in-memory map
-		storePlan(plan)
+		if plan.Name != "" {
+			existingPlan.Name = plan.Name
+		}
+		if plan.Amount != "" {
+			existingPlan.Amount = plan.Amount
+		}
+
+		PlanStore.Data[plan.ID] = existingPlan
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(PlanResponse{
-			Plan:    plan,
-			Message: "Plan added successfully",
+			Plan:    existingPlan,
+			Message: "Plan updated successfully",
 		})
 	}
 }
 
+// HandleCancelPlan Cancels current plan
+func HandleCancelPlan() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		planID := vars["id"]
+
+		PlanStore.Lock()
+		defer PlanStore.Unlock()
+
+		if _, exists := PlanStore.Data[planID]; !exists {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+
+		delete(PlanStore.Data, planID)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Plan canceled successfully",
+		})
+	}
+}
+
+// HandleListPlans
+func HandleListPlans() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		PlanStore.RLock()
+		defer PlanStore.RUnlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(PlanStore.Data); err != nil {
+			http.Error(w, "Failed to encode plan data", http.StatusInternalServerError)
+		}
+	}
+}
 
 // Helper function to add billing information to form data
 func addBillingInfo(formData url.Values, billing *BillingInfo) {

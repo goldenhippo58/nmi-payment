@@ -336,6 +336,93 @@ Voids a transaction before settlement.
 
 ---
 
+### 9. Terminal Operations
+
+#### Initialize Terminal
+
+**Endpoint:** `POST /terminal/init`
+
+Initializes a payment terminal for processing transactions.
+
+**Request Example:**
+```json
+{
+    "terminal_id": "TERM123",
+    "location": "Store-01",
+    "merchant_id": "MER12345",
+    "type": "terminal_setup"
+}
+```
+
+**Reponse Example:**
+```json
+
+{
+    "status": "success",
+    "terminal_id": "TERM123",
+    "message": "Terminal initialized successfully"
+}
+```
+
+### 10. Process Terminal Payment
+
+**Endpoint:** `POST /terminal/payment`
+
+Process a payment through an initialized terminal.
+
+**Request Example:**
+```json
+{
+    "terminal_id": "TERM123",
+    "amount": "25.99",
+    "type": "cc:sale",
+    "order_id": "ORD-123456",
+    "ccnumber": "4111111111111111",
+    "ccexp": "1225",
+    "cvv": "123"
+}
+```
+**Response Example:**
+```json
+{
+    "status": "success",
+    "transaction_id": "10317389463",
+    "auth_code": "ABC123",
+    "response_text": "Transaction Approved",
+    "amount": "25.99"
+}
+```
+### 11. Check Terminal Staus
+
+**Endpoint** `GET /terminal/status/{terminal_id}`
+
+Retrieves the current status of a terminal
+
+**Response Example:**
+```json
+{
+    "status": "active",
+    "terminal_id": "TERM123",
+    "location": "Store-01",
+    "last_transaction": "2025-01-15T18:25:43Z"
+}
+```
+
+### 12. Cancel Terminal Transaction
+
+**Endpoint** `POST /terminal/cancel/{terminal_id}`
+
+Cancels as in-progress terminal transaction.
+
+**Reponse Example:**
+```json
+{
+    "status": "success",
+    "message": "Transaction cancelled successfully",
+    "terminal_id": "TERM123"
+}
+```
+
 ## Migrating from Sandbox to Production
 
 ### Update Environment Configuration

@@ -172,6 +172,32 @@ type PlanResponse struct {
 	Message string `json:"message"`
 }
 
+// Terminal Request Structures
+type TerminalInitRequest struct {
+	APIKey     string `json:"api_key,omitempty"`
+	TerminalID string `json:"terminal_id"`
+	Location   string `json:"location"`
+	MerchantID string `json:"merchant_id,omitempty"`
+}
+
+type TerminalPaymentRequest struct {
+	APIKey     string `json:"api_key,omitempty"`
+	TerminalID string `json:"terminal_id"`
+	Amount     string `json:"amount"`
+	Type       string `json:"type"` // sale, refund, etc.
+	OrderID    string `json:"order_id,omitempty"`
+}
+
+// Terminal Response Structures
+type TerminalResponse struct {
+	Status        string `json:"status"`
+	TransactionID string `json:"transaction_id,omitempty"`
+	Amount        string `json:"amount,omitempty"`
+	ResponseText  string `json:"response_text"`
+	AuthCode      string `json:"auth_code,omitempty"`
+	Success       bool   `json:"success"`
+}
+
 // ProcessPayment handles all payment transactions
 func ProcessPayment(ctx context.Context, req PaymentRequest) (*PaymentResponse, error) {
 	// Track transaction processing time
@@ -684,6 +710,58 @@ func HandleListPlans() http.HandlerFunc {
 			http.Error(w, "Failed to encode plan data", http.StatusInternalServerError)
 		}
 	}
+}
+
+func ProcessTerminalInit(ctx context.Context, req TerminalInitRequest) (*TerminalResponse, error) {
+	formData := url.Values{}
+	formData.Set("security_key", req.APIKey)
+	formData.Set("terminal_id", req.TerminalID)
+	formData.Set("type", "terminal_setup") // Changed from 'terminal' to 'terminal_setup'
+	formData.Set("location", req.Location)
+	formData.Set("merchant_id", req.MerchantID)
+
+	resp, err := sendRequest(ctx, formData)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseTerminalResponse(resp)
+}
+
+func ProcessTerminalPayment(ctx context.Context, req TerminalPaymentRequest) (*TerminalResponse, error) {
+	formData := url.Values{}
+	formData.Set("security_key", req.APIKey)
+	formData.Set("terminal_id", req.TerminalID)
+	formData.Set("amount", req.Amount)
+	formData.Set("type", req.Type)
+
+	if req.OrderID != "" {
+		formData.Set("orderid", req.OrderID)
+	}
+
+	resp, err := sendRequest(ctx, formData)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseTerminalResponse(resp)
+}
+
+func parseTerminalResponse(resp string) (*TerminalResponse, error) {
+	// Parse the raw response from NMI
+	parsedResp, err := ParseNMIResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return &TerminalResponse{
+		Status:        parsedResp.Response,
+		TransactionID: parsedResp.TransactionID,
+		Amount:        ExtractValue(resp, "amount"),
+		ResponseText:  parsedResp.ResponseText,
+		AuthCode:      parsedResp.AuthCode,
+		Success:       parsedResp.Response == "1",
+	}, nil
 }
 
 // Helper function to add billing information to form data

@@ -121,6 +121,12 @@ func startMicroservice() {
 	// Health check endpoint
 	r.HandleFunc("/health", handleHealth).Methods("GET")
 
+	// Terminal endpoints
+	r.HandleFunc("/terminal/init", handleTerminalInit(cfg)).Methods("POST")
+	r.HandleFunc("/terminal/payment", handleTerminalPayment(cfg)).Methods("POST")
+	r.HandleFunc("/terminal/status/{terminal_id}", handleTerminalStatus()).Methods("GET")
+	r.HandleFunc("/terminal/cancel/{terminal_id}", handleTerminalCancel()).Methods("POST")
+
 	// Print all registered routes
 	fmt.Println("\nRegistered Routes:")
 	r.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
@@ -390,7 +396,7 @@ func handleCancelRecurring(cfg *config.Config) http.HandlerFunc {
 	}
 }
 
-func handleUpdatePlan(cfg *config.Config) http.HandlerFunc {
+func handleUpdatePlan() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var plan api.Plan
 		if err := json.NewDecoder(r.Body).Decode(&plan); err != nil {
@@ -426,6 +432,88 @@ func handleUpdatePlan(cfg *config.Config) http.HandlerFunc {
 			Message: "Plan updated successfully",
 		})
 	}
+}
+
+func handleTerminalInit(cfg *config.Config) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var req api.TerminalInitRequest
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            http.Error(w, "Invalid request payload", http.StatusBadRequest)
+            return
+        }
+
+        req.APIKey = cfg.APIKey
+        resp, err := api.ProcessTerminalInit(r.Context(), req)
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(resp)
+    }
+}
+
+func handleTerminalPayment(cfg *config.Config) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var req api.TerminalPaymentRequest
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            http.Error(w, "Invalid request payload", http.StatusBadRequest)
+            return
+        }
+
+        req.APIKey = cfg.APIKey
+        resp, err := api.ProcessTerminalPayment(r.Context(), req)
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(resp)
+    }
+}
+
+func handleTerminalStatus() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        vars := mux.Vars(r)
+        terminalID := vars["terminal_id"]
+
+        if terminalID == "" {
+            http.Error(w, "terminal_id is required", http.StatusBadRequest)
+            return
+        }
+
+        status := &api.TerminalResponse{
+            Status:       "success",
+            ResponseText: fmt.Sprintf("Terminal %s is active", terminalID),
+            Success:      true,
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(status)
+    }
+}
+
+func handleTerminalCancel() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        vars := mux.Vars(r)
+        terminalID := vars["terminal_id"]
+
+        if terminalID == "" {
+            http.Error(w, "terminal_id is required", http.StatusBadRequest)
+            return
+        }
+
+        response := &api.TerminalResponse{
+            Status:       "success",
+            ResponseText: fmt.Sprintf("Transaction cancelled for terminal %s", terminalID),
+            Success:      true,
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(response)
+    }
 }
 
 // Standalone mode for testing

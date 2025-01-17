@@ -263,3 +263,13 @@ func validateBillingCycle(cycle string) error {
 
 	return nil
 }
+
+func ValidateTerminalRequest(req TerminalInitRequest) error {
+    if req.TerminalID == "" {
+        return NewNMIError(ErrInvalidRequest, "terminal_id is required", "")
+    }
+    if req.Location == "" {
+        return NewNMIError(ErrInvalidRequest, "location is required", "")
+    }
+    return nil
+}
